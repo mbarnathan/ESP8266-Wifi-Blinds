@@ -54,7 +54,7 @@ metadata {
                 attributeState "level", action:"switch level.setLevel"
             }
         }
-        standardTile("refresh", "device.switch", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
+        standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
             state "default", label:"", action:"refresh.refresh", icon:"st.secondary.refresh"
         }
 
@@ -62,8 +62,8 @@ metadata {
             state "level", label:'${currentValue} %', unit:"%", backgroundColor:"#ffffff"
         }
 
-        valueTile("ip", "device.hubMac", decoration: "flat", width: 2, height: 1) {
-            state "default", label:'IP: ${currentValue}', width: 2, height: 1
+        valueTile("ip", "ip", decoration: "flat", width: 2, height: 2) {
+            state "default", label:'IP: ${currentValue}', width: 2, height: 2
         }
 
         main "switch"
@@ -75,11 +75,29 @@ metadata {
 def parse(String description) {
     log.debug "Parsing '${description}'"
 
-    def keyVal = description.split(":", 2)
-    if (keyVal[0] in ["level", "switch"]) {
+    def msg = parseLanMessage(description)
+    log.debug "Parsed to ${msg}"
+
+    def keyVal = msg.body.split(": ?", 2)
+    if (keyVal[0] == "level") {
+        log.trace "Wifi Blinds: parsed level ${keyVal[1]}"
+        sendEvent(name: "switch", value: "${keyVal[1]}" == "0" ? "off" : "on")
         return createEvent(name: keyVal[0], value: keyVal[1])
+    } else if (keyVal[0] == "switch") {
+        return createEvent(name: keyVal[0], value: keyVal[1])
+    } else if (keyVal[0] == "status") {
+        if (keyVal[1] in ["rising", "falling"]) {
+            log.trace "Wifi Blinds: parsed status ${keyVal[1]}"
+            return createEvent(name: "switch", keyVal[1] == "falling" ? "turningOn" : "turningOff")
+        } else {
+            log.warn "Wifi Blinds: invalid status ${keyVal[1]}"
+            return null
+        }
     } else if (keyVal[0] == "updated") {
         log.trace "Wifi Blinds was updated"
+        return null
+    } else if (keyVal[0] == "ping") {
+        log.trace "Wifi Blinds were pinged"
         return null
     } else {
         log.warn "Unknown event in Wifi Blinds parse(): ${description}"
@@ -126,7 +144,7 @@ def refresh() {
     log.info("Wifi Blinds ${device.deviceNetworkId} refreshing at ${device.currentValue("ip")}")
     return new physicalgraph.device.HubAction([
             method: "POST",
-            path: "/subscribe",
+            path: "/register",
             headers: [
                     HOST: "${netAddr}:80",
                     "Content-Length": 0
