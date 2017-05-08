@@ -4,7 +4,7 @@
 #include <ESP8266SSDP.h>
 
 const char* ssid = "SSID";
-const char* password = "password";
+const char* password = "PASSWORD";
 
 ESP8266WebServer HTTP(80);
 
@@ -20,23 +20,24 @@ const int DOWN_TRIGGER = 12;
 unsigned long riseStart = 0;
 unsigned long fallStart = 0;
 
-volatile boolean pendingUp = false;
-volatile boolean pendingDown = false;
+volatile unsigned long pendingUp = 0;
+volatile unsigned long pendingDown = 0;
 
-const int DRAW_MS = 18000; // Time from 100% up to 100% down / vice versa
+const int DRAW_MS = 12000; // Time from 100% up to 100% down / vice versa
 
 int currentLevel = 0;
 String updateAddress = "";
 
 template<class T> inline Print &operator <<(Print &obj, T arg) { obj.print(arg); return obj; }
 
-// These ISRs are idempotent until the polling loop picks up the var, so no need to debounce.
-
 void ICACHE_RAM_ATTR upPressed() {
   if (digitalRead(UP_TRIGGER) == LOW) {
     // Falling.
     digitalWrite(PIN_UP, HIGH);
-    pendingUp = true;
+    unsigned long newPendingUp = millis();
+    if (newPendingUp - pendingUp > 100) {
+      pendingUp = millis();
+    }
   } else {
     // Rising
     digitalWrite(PIN_UP, LOW);
@@ -47,7 +48,10 @@ void ICACHE_RAM_ATTR downPressed() {
   if (digitalRead(DOWN_TRIGGER) == LOW) {
     // Falling.
     digitalWrite(PIN_DOWN, HIGH);
-    pendingDown = true;
+    unsigned long newPendingDown = millis();
+    if (newPendingDown - pendingDown > 100) {
+      pendingDown = millis();
+    }
   } else {
     // Rising
     digitalWrite(PIN_DOWN, LOW);
@@ -188,10 +192,12 @@ void setLevel(int percent) {
 
   Serial << "This will take " << duration << " ms.\n";
 
-  engagePin(pinToEngage, 1000);
+  engagePin(pinToEngage, 500);
   Serial << "Wait for it...\n";
   delay(duration);
-  engagePin(stopPin, 100);
+  if (percent != 0 && percent != 100) {
+    engagePin(stopPin, 500);
+  }
   
   digitalWrite(BLUE_LED, LOW);
   digitalWrite(RED_LED, LOW);
@@ -208,6 +214,8 @@ void resetPins() {
   pinMode(PIN_DOWN, OUTPUT);
   digitalWrite(PIN_UP, LOW);
   digitalWrite(PIN_DOWN, LOW);
+  delay(10);
+  engagePin(PIN_UP, 500);
 }
 
 // Pins never need to be held on, just "flicked".
@@ -228,33 +236,37 @@ void loop() {
 void handlePins() {
   int newLevel = -1;
 
-  if (pendingUp) {
+  if (pendingUp > 0) {
     riseStart = millis();
     if (fallStart > 0) {
-      newLevel = constrain(currentLevel - (riseStart - fallStart) / DRAW_MS * 100, 0, 100);
+      // Hit down (move), then up (stop). Net down.
+      newLevel = constrain(currentLevel + (riseStart - fallStart) * 100 / DRAW_MS, 0, 100);
       fallStart = 0;
+      riseStart = 0;
     }
   }
 
-  if (pendingDown) {
+  if (pendingDown > 0) {
     fallStart = millis();
     if (riseStart > 0) {
-      newLevel = constrain(currentLevel + (fallStart - riseStart) / DRAW_MS * 100, 0, 100);
+      // Hit up (move), then down (stop). Net up.
+      newLevel = constrain(currentLevel - (fallStart - riseStart) * 100 / DRAW_MS, 0, 100);
       riseStart = 0;
+      fallStart = 0;
     }
   }
 
   if (newLevel >= 0 && newLevel != currentLevel) {
     currentLevel = newLevel;
     sendCurrentLevel();
-  } else if (pendingUp && !pendingDown) {
+  } else if (pendingUp > 0 && pendingDown == 0) {
     sendUp();
-  } else if (pendingDown && !pendingUp) {
+  } else if (pendingDown > 0 && pendingUp == 0) {
     sendDown();
   }
 
-  pendingUp = false;
-  pendingDown = false;
+  pendingUp = 0;
+  pendingDown = 0;
 }
 
 void sendUp() {
