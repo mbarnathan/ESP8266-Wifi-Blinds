@@ -141,7 +141,8 @@ def setLevel(level) {
 }
 
 def refresh() {
-    log.info("Wifi Blinds ${device.deviceNetworkId} refreshing at ${device.currentValue("ip")}")
+    def netAddr = device.currentValue("ip")
+    log.info("Wifi Blinds ${device.deviceNetworkId} refreshing at ${netAddr}")
     return new physicalgraph.device.HubAction([
             method: "POST",
             path: "/register",

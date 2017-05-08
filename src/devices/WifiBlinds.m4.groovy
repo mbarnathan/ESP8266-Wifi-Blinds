@@ -119,7 +119,8 @@ def setLevel(level) {
 }
 
 def refresh() {
-    log.info("__human_name__ ${device.deviceNetworkId} refreshing at ${device.currentValue("ip")}")
+    def netAddr = device.currentValue("ip")
+    log.info("__human_name__ ${device.deviceNetworkId} refreshing at ${netAddr}")
     return new physicalgraph.device.HubAction([
             method: "POST",
             path: "/register",
