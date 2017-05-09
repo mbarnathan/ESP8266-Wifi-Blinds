@@ -26,7 +26,9 @@ volatile unsigned long pendingDown = 0;
 const int DRAW_MS = 12000; // Time from 100% up to 100% down / vice versa
 
 int currentLevel = 0;
+
 String updateAddress = "";
+unsigned int updatePort = 80;
 
 template<class T> inline Print &operator <<(Print &obj, T arg) { obj.print(arg); return obj; }
 
@@ -86,21 +88,27 @@ void setupWifi() {
 
         int levelInt = level.toInt();
         if (levelInt < 0 || levelInt > 100) {
-          HTTP.send(400, "text/plain", "Level out of range");
+          sendJson(400, "error", "Level out of range");
           return;
         }
         setLevel(levelInt);
-        HTTP.send(200, "text/plain", String("level: ") + level);
+        sendJson(200, "level", String(level));
       });
   
       HTTP.on("/get", [](){
         Serial << "Get request: " << currentLevel << "\n";
-        HTTP.send(200, "text/plain", String("level: ") + String(currentLevel));
+        sendJson(200, "level", String(currentLevel));
       });
 
       HTTP.on("/register", [](){
-        updateAddress = HTTP.client().remoteIP().toString();
-        HTTP.send(200, "text/plain", "Hi! I'll send updates your way.");
+        unsigned int port = HTTP.arg("port").toInt();
+        updatePort = port > 0 ? port : 80;
+        updateAddress = HTTP.arg("addr");
+        updateAddress.trim();
+        if (updateAddress.length() == 0) {
+          updateAddress = HTTP.client().remoteIP().toString();
+        }
+        sendJson(200, "update", updateAddress + String(":") + String(updatePort));
       });
 
       HTTP.on("/description.xml", HTTP_GET, [](){
@@ -271,39 +279,50 @@ void handlePins() {
 
 void sendUp() {
   if (currentLevel > 0) {
-    request("status: rising");
+    requestJson("status", "rising");
   }
 }
 
 void sendDown() {
   if (currentLevel < 100) {
-    request("status: falling");
+    requestJson("status", "falling");
   }
 }
 
 void sendCurrentLevel() {
-  request(String("level: ") + String(currentLevel));
+  requestJson("level", String(currentLevel));
 }
 
-void request(String data) {
+void requestJson(String key, String value) {
+  String data = json(key, value);
   if (updateAddress.length() == 0) {
     Serial << "No update address registered, not sending " << data << "\n";
     return;
   }
 
-  Serial << "Sending data to " << updateAddress << ": " << data << "\n";
+  Serial << "Sending data to " << updateAddress << ":" << updatePort << ": " << data << "\n";
 
   HTTPClient hclient;
-  if (!hclient.begin(String("http://") + updateAddress)) {
-    Serial << "Error making HTTP request to " << updateAddress << "\n";
+  String url = "http://" + updateAddress + ":" + String(updatePort) + "/";
+  if (!hclient.begin(url)) {
+    Serial << "Error making HTTP request to " << url << "\n";
   }
 
+  hclient.addHeader("Content-Type", "application/json");
   int response = hclient.POST(data);
   if (response != HTTP_CODE_OK) {
-    Serial << "Response " << response << " from " << updateAddress << "\n";
+    Serial << "Response " << response << " from " << url << "\n";
   }
 
   hclient.end();
+}
+
+void sendJson(int response, String key, String value) {
+  HTTP.send(response, "application/json", json(key, value));
+}
+
+String json(String key, String value) {
+  return "{\"" + key + "\":\"" + value + "\"}";
 }
 
 void addUpdatingTo(ESP8266WebServer &server) {

@@ -77,27 +77,31 @@ def parse(String description) {
 
     def msg = parseLanMessage(description)
     log.debug "Parsed to ${msg}"
+    if (!msg.json) {
+        return null
+    }
 
-    def keyVal = msg.body.split(": ?", 2)
-    if (keyVal[0] == "level") {
-        log.trace "Wifi Blinds: parsed level ${keyVal[1]}"
-        sendEvent(name: "switch", value: "${keyVal[1]}" == "0" ? "off" : "on")
-        return createEvent(name: keyVal[0], value: keyVal[1])
-    } else if (keyVal[0] == "switch") {
-        return createEvent(name: keyVal[0], value: keyVal[1])
-    } else if (keyVal[0] == "status") {
-        if (keyVal[1] in ["rising", "falling"]) {
-            log.trace "Wifi Blinds: parsed status ${keyVal[1]}"
-            return createEvent(name: "switch", keyVal[1] == "falling" ? "turningOn" : "turningOff")
+    def json = msg.json
+    if (json.containsKey("level")) {
+        log.trace "Wifi Blinds: parsed level ${json.level}"
+        sendEvent(name: "switch", value: "${json.level}" == "0" ? "off" : "on")
+        return createEvent(name: "level", value: json.level)
+    } else if (json.containsKey("switch")) {
+        return createEvent(name: "switch", value: json.switch)
+    } else if (json.containsKey("status")) {
+        if (json.status in ["rising", "falling"]) {
+            log.trace "Wifi Blinds: parsed status ${json.status}"
+            return createEvent(name: "switch",
+                               value: (json.status == "falling" ? "turningOn" : "turningOff"))
         } else {
-            log.warn "Wifi Blinds: invalid status ${keyVal[1]}"
+            log.warn "Wifi Blinds: invalid status ${json.status}"
             return null
         }
-    } else if (keyVal[0] == "updated") {
+    } else if (json.containsKey("updated")) {
         log.trace "Wifi Blinds was updated"
         return null
-    } else if (keyVal[0] == "ping") {
-        log.trace "Wifi Blinds were pinged"
+    } else if (json.containsKey("update")) {
+        log.trace "Wifi Blinds update address is now ${json.update}"
         return null
     } else {
         log.warn "Unknown event in Wifi Blinds parse(): ${description}"
@@ -142,6 +146,8 @@ def setLevel(level) {
 
 def refresh() {
     def netAddr = device.currentValue("ip")
+    def dni = device.deviceNetworkId
+
     log.info("Wifi Blinds ${device.deviceNetworkId} refreshing at ${netAddr}")
     return new physicalgraph.device.HubAction([
             method: "POST",
@@ -150,6 +156,7 @@ def refresh() {
                     HOST: "${netAddr}:80",
                     "Content-Length": 0
             ],
-            query: [device: dni]
+            query: [device: dni, addr: device.hub.getDataValue("localIP"),
+                    port: device.hub.getDataValue("localSrvPortTCP")]
     ], "${dni}")
 }
